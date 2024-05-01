@@ -1,5 +1,11 @@
 package main
 
+import (
+	"log"
+	"sync"
+	"time"
+)
+
 type User struct {
 	Email string
 }
@@ -20,6 +26,7 @@ type Handler struct {
 	repository          UserRepository
 	newsletterClient    NewsletterClient
 	notificationsClient NotificationsClient
+	wg                  *sync.WaitGroup
 }
 
 func NewHandler(
@@ -31,21 +38,50 @@ func NewHandler(
 		repository:          repository,
 		newsletterClient:    newsletterClient,
 		notificationsClient: notificationsClient,
+		wg:                  &sync.WaitGroup{},
 	}
 }
 
 func (h Handler) SignUp(u User) error {
-	if err := h.repository.CreateUserAccount(u); err != nil {
-		return err
-	}
+	h.wg.Add(3)
+	go func() {
+		for {
+			if err := h.repository.CreateUserAccount(u); err != nil {
+				log.Printf("error in create user account failed to add user to the newsletter: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			break
+		}
+		h.wg.Done()
+	}()
 
-	if err := h.newsletterClient.AddToNewsletter(u); err != nil {
-		return err
-	}
+	go func() {
+		for {
+			err := h.newsletterClient.AddToNewsletter(u)
+			if err != nil {
+				log.Printf("error in add to news letter failed to add user to the newsletter: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			break
+		}
+		h.wg.Done()
+	}()
 
-	if err := h.notificationsClient.SendNotification(u); err != nil {
-		return err
-	}
+	go func() {
+		for {
+			err := h.notificationsClient.SendNotification(u)
+			if err != nil {
+				log.Printf("error in send notification failed to add user to the newsletter: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			break
+		}
+		h.wg.Done()
+	}()
 
+	h.wg.Wait()
 	return nil
 }
