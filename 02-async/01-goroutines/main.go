@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"sync"
 	"time"
 )
 
@@ -26,7 +25,6 @@ type Handler struct {
 	repository          UserRepository
 	newsletterClient    NewsletterClient
 	notificationsClient NotificationsClient
-	wg                  *sync.WaitGroup
 }
 
 func NewHandler(
@@ -38,12 +36,10 @@ func NewHandler(
 		repository:          repository,
 		newsletterClient:    newsletterClient,
 		notificationsClient: notificationsClient,
-		wg:                  &sync.WaitGroup{},
 	}
 }
 
 func (h Handler) SignUp(u User) error {
-	h.wg.Add(3)
 	go func() {
 		for {
 			if err := h.repository.CreateUserAccount(u); err != nil {
@@ -53,7 +49,6 @@ func (h Handler) SignUp(u User) error {
 			}
 			break
 		}
-		h.wg.Done()
 	}()
 
 	go func() {
@@ -66,7 +61,6 @@ func (h Handler) SignUp(u User) error {
 			}
 			break
 		}
-		h.wg.Done()
 	}()
 
 	go func() {
@@ -79,9 +73,7 @@ func (h Handler) SignUp(u User) error {
 			}
 			break
 		}
-		h.wg.Done()
 	}()
 
-	h.wg.Wait()
 	return nil
 }
