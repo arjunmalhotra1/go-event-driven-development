@@ -40,16 +40,9 @@ func NewHandler(
 }
 
 func (h Handler) SignUp(u User) error {
-	go func() {
-		for {
-			if err := h.repository.CreateUserAccount(u); err != nil {
-				log.Printf("error in create user account failed to add user to the newsletter: %v", err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			break
-		}
-	}()
+	if err := h.repository.CreateUserAccount(u); err != nil {
+		return err
+	}
 
 	go func() {
 		for {
