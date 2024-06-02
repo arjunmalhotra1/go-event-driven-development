@@ -14,8 +14,9 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
 
@@ -35,104 +36,46 @@ type Message struct {
 	TicketId string
 }
 
-func IssueReceipt() {
-	logger := watermill.NewStdLogger(false, false)
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_ADDR"),
-	})
-
-	sub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
-		Client: rdb,
-	}, logger)
-
-	if err != nil {
-		panic(err)
-	}
-
-	router, err := message.NewRouter(message.RouterConfig{}, logger)
-	if err != nil {
-		panic(err)
-	}
-
-	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"), nil)
-	if err != nil {
-		panic(err)
-	}
-	receiptsClient := NewReceiptsClient(clients)
-
-	router.AddNoPublisherHandler("test_handler", "issue-receipt", sub, func(msg *message.Message) error {
-		orderID := string(msg.Payload)
-		return receiptsClient.IssueReceipt(context.Background(), orderID)
-	})
-
-	err = router.Run(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
-}
-
-func AppendToTracker() {
-	logger := watermill.NewStdLogger(false, false)
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_ADDR"),
-	})
-
-	subscriber, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
-		Client: rdb,
-	}, logger)
-
-	if err != nil {
-		panic(err)
-	}
-
-	router, err := message.NewRouter(message.RouterConfig{}, logger)
-	if err != nil {
-		panic(err)
-	}
+func main() {
+	log.Init(logrus.InfoLevel)
 
 	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"), nil)
 	if err != nil {
 		panic(err)
 	}
 	spreadsheetsClient := NewSpreadsheetsClient(clients)
+	receiptsClient := NewReceiptsClient(clients)
 
-	router.AddNoPublisherHandler("test_handler", "append-to-tracker", subscriber, func(msg *message.Message) error {
-		orderID := string(msg.Payload)
-		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{orderID})
-	})
-
-	err = router.Run(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
-}
-
-func main() {
-	log.Init(logrus.InfoLevel)
-
-	go IssueReceipt()
-	go AppendToTracker()
-
-	e := commonHTTP.NewEcho()
-
-	logger := watermill.NewStdLogger(false, false)
+	watermillLogger := log.NewWatermill(logrus.NewEntry(logrus.StandardLogger()))
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr: os.Getenv("REDIS_ADDR"),
 	})
 
 	publisher, err := redisstream.NewPublisher(redisstream.PublisherConfig{Client: rdb},
-		logger,
+		watermillLogger,
 	)
-
 	if err != nil {
 		panic(err)
 	}
 
+	issueReceiptSub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
+		Client:        rdb,
+		ConsumerGroup: "issue-receipt",
+	}, watermillLogger)
+	if err != nil {
+		panic(err)
+	}
+
+	appendToTrackerSub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
+		Client:        rdb,
+		ConsumerGroup: "append-to-tracker",
+	}, watermillLogger)
+	if err != nil {
+		panic(err)
+	}
+
+	e := commonHTTP.NewEcho()
 	e.POST("/tickets-confirmation", func(c echo.Context) error {
 		var request TicketsConfirmationRequest
 		err := c.Bind(&request)
@@ -157,12 +100,35 @@ func main() {
 		return c.NoContent(http.StatusOK)
 	})
 
+	router, err := message.NewRouter(message.RouterConfig{}, watermillLogger)
+	if err != nil {
+		panic(err)
+	}
+
+	router.AddNoPublisherHandler("print_ticket", "append-to-tracker", appendToTrackerSub, func(msg *message.Message) error {
+		orderID := string(msg.Payload)
+		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{orderID})
+	})
+
+	router.AddNoPublisherHandler("issue_receipt", "issue-receipt", issueReceiptSub, func(msg *message.Message) error {
+		orderID := string(msg.Payload)
+		return receiptsClient.IssueReceipt(context.Background(), orderID)
+	})
+
+	go func() {
+		err = router.Run(context.Background())
+		if err != nil {
+			panic(err)
+		}
+	}()
+
 	logrus.Info("Server starting...")
 
 	err = e.Start(":8080")
 	if err != nil && err != http.ErrServerClosed {
 		panic(err)
 	}
+
 }
 
 type ReceiptsClient struct {
