@@ -42,7 +42,7 @@ func IssueReceipt() {
 		Addr: os.Getenv("REDIS_ADDR"),
 	})
 
-	subscriber, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
+	sub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
 		Client: rdb,
 	}, logger)
 
@@ -50,8 +50,7 @@ func IssueReceipt() {
 		panic(err)
 	}
 
-	messages, err := subscriber.Subscribe(context.Background(), "issue-receipt")
-
+	router, err := message.NewRouter(message.RouterConfig{}, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -62,15 +61,14 @@ func IssueReceipt() {
 	}
 	receiptsClient := NewReceiptsClient(clients)
 
-	for msg := range messages {
+	router.AddNoPublisherHandler("test_handler", "issue-receipt", sub, func(msg *message.Message) error {
 		orderID := string(msg.Payload)
-		// issue the receipt
-		err := receiptsClient.IssueReceipt(context.Background(), orderID)
-		if err != nil {
-			msg.Nack()
-			continue
-		}
-		msg.Ack()
+		return receiptsClient.IssueReceipt(context.Background(), orderID)
+	})
+
+	err = router.Run(context.Background())
+	if err != nil {
+		panic(err)
 	}
 
 }
@@ -90,30 +88,25 @@ func AppendToTracker() {
 		panic(err)
 	}
 
+	router, err := message.NewRouter(message.RouterConfig{}, logger)
+	if err != nil {
+		panic(err)
+	}
+
 	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"), nil)
 	if err != nil {
 		panic(err)
 	}
 	spreadsheetsClient := NewSpreadsheetsClient(clients)
 
-	messages, err := subscriber.Subscribe(context.Background(), "append-to-tracker")
+	router.AddNoPublisherHandler("test_handler", "append-to-tracker", subscriber, func(msg *message.Message) error {
+		orderID := string(msg.Payload)
+		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{orderID})
+	})
 
+	err = router.Run(context.Background())
 	if err != nil {
 		panic(err)
-	}
-
-	for msg := range messages {
-		orderID := string(msg.Payload)
-
-		err := spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{orderID})
-
-		if err != nil {
-			msg.Nack()
-			continue
-		}
-
-		msg.Ack()
-
 	}
 
 }
