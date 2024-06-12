@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -14,6 +16,11 @@ type PaymentCompleted struct {
 	PaymentID   string `json:"payment_id"`
 	OrderID     string `json:"order_id"`
 	CompletedAt string `json:"completed_at"`
+}
+
+type OrderCompleted struct {
+	OrderID     string `json:"order_id"`
+	ConfirmedAt string `json:"confirmed_at"`
 }
 
 func main() {
@@ -41,6 +48,31 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	router.AddHandler("test-marshall", "payment-completed", sub, "order-confirmed", pub,
+		func(msg *message.Message) ([]*message.Message, error) {
+			var pCompletedEvent PaymentCompleted
+			var oCompletedEvent OrderCompleted
+
+			err := json.Unmarshal(msg.Payload, &pCompletedEvent)
+			if err != nil {
+				panic("failed to unmarshall")
+			}
+
+			oCompletedEvent.ConfirmedAt = pCompletedEvent.CompletedAt
+			oCompletedEvent.OrderID = pCompletedEvent.OrderID
+
+			fmt.Println("o:", oCompletedEvent.ConfirmedAt)
+
+			oCompletedBytes, err := json.Marshal(oCompletedEvent)
+			if err != nil {
+				panic("failed to marshal")
+			}
+
+			newMsg := message.NewMessage(watermill.NewUUID(), oCompletedBytes)
+
+			return []*message.Message{newMsg}, nil
+		})
 
 	err = router.Run(context.Background())
 	if err != nil {
