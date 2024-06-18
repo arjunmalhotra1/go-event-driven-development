@@ -36,36 +36,36 @@ type Ticket struct {
 	Price         Price  `json:"price"`
 }
 
-type Header struct {
+type EventHeader struct {
 	ID          string `json:"id"`
 	PublishedAt string `json:"published_at"`
 }
 
 type TicketBookingConfirmed struct {
-	Header        Header `json:"header"`
-	TicketID      string `json:"ticket_id"`
-	CustomerEmail string `json:"customer_email"`
-	Price         Price  `json:"price"`
+	Header        EventHeader `json:"header"`
+	TicketID      string      `json:"ticket_id"`
+	CustomerEmail string      `json:"customer_email"`
+	Price         Money       `json:"price"`
 }
 
-type Price struct {
+type Money struct {
 	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
 }
 
 type IssueReceiptRequest struct {
 	TicketID string `json:"ticket_id"`
-	Price    Price  `json:"price"`
+	Price    Money  `json:"price"`
 }
 
 type AppendToTrackerRequest struct {
 	TicketID      string `json:"ticket_id"`
 	CustomerEmail string `json:"customer_email"`
-	Price         Price  `json:"price"`
+	Price         Money  `json:"price"`
 }
 
-func NewHeader() Header {
-	return Header{
+func NewHeader() EventHeader {
+	return EventHeader{
 		ID:          uuid.NewString(),
 		PublishedAt: time.Now().Format(time.RFC3339),
 	}
@@ -78,6 +78,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	spreadsheetsClient := NewSpreadsheetsClient(clients)
 	receiptsClient := NewReceiptsClient(clients)
 
@@ -120,14 +121,12 @@ func main() {
 
 		for _, ticket := range request.Tickets {
 
-			// ticketBytes, err := json.Marshal(ticket)
-			// if err != nil {
-			// 	panic("couldn't marshal ticket")
-			// }
+			if ticket.Status != "confirmed" {
+				continue
+			}
 
-			header := NewHeader()
 			event := TicketBookingConfirmed{
-				Header:        header,
+				Header:        NewHeader(),
 				TicketID:      ticket.TicketID,
 				CustomerEmail: ticket.CustomerEmail,
 				Price:         ticket.Price,
@@ -139,16 +138,6 @@ func main() {
 			}
 
 			msg := message.NewMessage(watermill.NewUUID(), payload)
-
-			// err = publisher.Publish("issue-receipt", msg)
-			// if err != nil {
-			// 	panic(err)
-			// }
-
-			// err = publisher.Publish("append-to-tracker", msg)
-			// if err != nil {
-			// 	panic(err)
-			// }
 
 			err = publisher.Publish("TicketBookingConfirmed", msg)
 			if err != nil {
@@ -211,6 +200,7 @@ func main() {
 
 	g.Go(func() error {
 
+		// we don't want to start HTTP server before Watermill router (so service won't be healthy before it's ready)
 		<-router.Running()
 
 		err := e.Start(":8080")
