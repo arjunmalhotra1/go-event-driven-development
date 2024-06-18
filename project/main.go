@@ -48,6 +48,13 @@ type TicketBookingConfirmed struct {
 	Price         Money       `json:"price"`
 }
 
+type TicketBookingCanceled struct {
+	Header        EventHeader `json:"header"`
+	TicketID      string      `json:"ticket_id"`
+	CustomerEmail string      `json:"customer_email"`
+	Price         Money       `json:"price"`
+}
+
 type Money struct {
 	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
@@ -121,27 +128,46 @@ func main() {
 
 		for _, ticket := range request.Tickets {
 
-			if ticket.Status != "confirmed" {
-				continue
+			if ticket.Status == "canceled" {
+				event := TicketBookingCanceled{
+					Header:        NewHeader(),
+					TicketID:      ticket.TicketID,
+					CustomerEmail: ticket.CustomerEmail,
+					Price:         ticket.Price,
+				}
+
+				payload, err := json.Marshal(event)
+				if err != nil {
+					return err
+				}
+
+				msg := message.NewMessage(watermill.NewUUID(), payload)
+
+				err = publisher.Publish("TicketBookingCanceled", msg)
+				if err != nil {
+					panic(err)
+				}
 			}
 
-			event := TicketBookingConfirmed{
-				Header:        NewHeader(),
-				TicketID:      ticket.TicketID,
-				CustomerEmail: ticket.CustomerEmail,
-				Price:         ticket.Price,
-			}
+			if ticket.Status == "confirmed" {
+				event := TicketBookingConfirmed{
+					Header:        NewHeader(),
+					TicketID:      ticket.TicketID,
+					CustomerEmail: ticket.CustomerEmail,
+					Price:         ticket.Price,
+				}
 
-			payload, err := json.Marshal(event)
-			if err != nil {
-				return err
-			}
+				payload, err := json.Marshal(event)
+				if err != nil {
+					return err
+				}
 
-			msg := message.NewMessage(watermill.NewUUID(), payload)
+				msg := message.NewMessage(watermill.NewUUID(), payload)
 
-			err = publisher.Publish("TicketBookingConfirmed", msg)
-			if err != nil {
-				panic(err)
+				err = publisher.Publish("TicketBookingConfirmed", msg)
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 
@@ -184,6 +210,21 @@ func main() {
 		issueReceiptReq.Price = event.Price
 
 		return receiptsClient.IssueReceipt(context.Background(), issueReceiptReq)
+	})
+
+	router.AddNoPublisherHandler("cancel_ticket", "TicketBookingCanceled", appendToTrackerSub, func(msg *message.Message) error {
+		var event TicketBookingConfirmed
+		err := json.Unmarshal(msg.Payload, &event)
+		if err != nil {
+			panic(err)
+		}
+
+		var payload AppendToTrackerRequest
+		payload.TicketID = event.TicketID
+		payload.CustomerEmail = event.CustomerEmail
+		payload.Price = event.Price
+
+		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-refund", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
 	})
 
 	ctx := context.Background()
