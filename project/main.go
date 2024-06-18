@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients/receipts"
@@ -16,6 +17,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +36,18 @@ type Ticket struct {
 	Price         Price  `json:"price"`
 }
 
+type Header struct {
+	ID          string `json:"id"`
+	PublishedAt string `json:"published_at"`
+}
+
+type TicketBookingConfirmed struct {
+	Header        Header `json:"header"`
+	TicketID      string `json:"ticket_id"`
+	CustomerEmail string `json:"customer_email"`
+	Price         Price  `json:"price"`
+}
+
 type Price struct {
 	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
@@ -48,6 +62,13 @@ type AppendToTrackerRequest struct {
 	TicketID      string `json:"ticket_id"`
 	CustomerEmail string `json:"customer_email"`
 	Price         Price  `json:"price"`
+}
+
+func NewHeader() Header {
+	return Header{
+		ID:          uuid.NewString(),
+		PublishedAt: time.Now().Format(time.RFC3339),
+	}
 }
 
 func main() {
@@ -99,19 +120,37 @@ func main() {
 
 		for _, ticket := range request.Tickets {
 
-			ticketBytes, err := json.Marshal(ticket)
-			if err != nil {
-				panic("couldn't marshal ticket")
+			// ticketBytes, err := json.Marshal(ticket)
+			// if err != nil {
+			// 	panic("couldn't marshal ticket")
+			// }
+
+			header := NewHeader()
+			event := TicketBookingConfirmed{
+				Header:        header,
+				TicketID:      ticket.TicketID,
+				CustomerEmail: ticket.CustomerEmail,
+				Price:         ticket.Price,
 			}
 
-			msg := message.NewMessage(watermill.NewUUID(), ticketBytes)
-
-			err = publisher.Publish("issue-receipt", msg)
+			payload, err := json.Marshal(event)
 			if err != nil {
-				panic(err)
+				return err
 			}
 
-			err = publisher.Publish("append-to-tracker", msg)
+			msg := message.NewMessage(watermill.NewUUID(), payload)
+
+			// err = publisher.Publish("issue-receipt", msg)
+			// if err != nil {
+			// 	panic(err)
+			// }
+
+			// err = publisher.Publish("append-to-tracker", msg)
+			// if err != nil {
+			// 	panic(err)
+			// }
+
+			err = publisher.Publish("TicketBookingConfirmed", msg)
 			if err != nil {
 				panic(err)
 			}
@@ -129,21 +168,32 @@ func main() {
 		panic(err)
 	}
 
-	router.AddNoPublisherHandler("print_ticket", "append-to-tracker", appendToTrackerSub, func(msg *message.Message) error {
-		var payload AppendToTrackerRequest
-		err := json.Unmarshal(msg.Payload, &payload)
+	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
+		var event TicketBookingConfirmed
+		err := json.Unmarshal(msg.Payload, &event)
 		if err != nil {
 			panic(err)
 		}
+
+		var payload AppendToTrackerRequest
+		payload.TicketID = event.TicketID
+		payload.CustomerEmail = event.CustomerEmail
+		payload.Price = event.Price
+
 		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
 	})
 
-	router.AddNoPublisherHandler("issue_receipt", "issue-receipt", issueReceiptSub, func(msg *message.Message) error {
-		var issueReceiptReq IssueReceiptRequest
-		err := json.Unmarshal(msg.Payload, &issueReceiptReq)
+	router.AddNoPublisherHandler("issue_receipt", "TicketBookingConfirmed", issueReceiptSub, func(msg *message.Message) error {
+		var event TicketBookingConfirmed
+		err := json.Unmarshal(msg.Payload, &event)
 		if err != nil {
 			panic(err)
 		}
+
+		var issueReceiptReq IssueReceiptRequest
+		issueReceiptReq.TicketID = event.TicketID
+		issueReceiptReq.Price = event.Price
+
 		return receiptsClient.IssueReceipt(context.Background(), issueReceiptReq)
 	})
 
