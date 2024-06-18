@@ -33,7 +33,7 @@ type Ticket struct {
 	TicketID      string `json:"ticket_id"`
 	Status        string `json:"status"`
 	CustomerEmail string `json:"customer_email"`
-	Price         Price  `json:"price"`
+	Price         Money  `json:"price"`
 }
 
 type EventHeader struct {
