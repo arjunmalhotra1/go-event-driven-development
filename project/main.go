@@ -183,6 +183,8 @@ func main() {
 		panic(err)
 	}
 
+	router.AddMiddleware(SaveLogsMiddleware())
+
 	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
 		var event TicketBookingConfirmed
 		err := json.Unmarshal(msg.Payload, &event)
@@ -264,6 +266,15 @@ func main() {
 		panic(err)
 	}
 
+}
+
+func SaveLogsMiddleware() func(message.HandlerFunc) message.HandlerFunc {
+	return func(f message.HandlerFunc) message.HandlerFunc {
+		return func(msg *message.Message) ([]*message.Message, error) {
+			logrus.WithField("message_uuid", msg.UUID).Info("Handling a message")
+			return f(msg)
+		}
+	}
 }
 
 type ReceiptsClient struct {
