@@ -191,8 +191,8 @@ func main() {
 		panic(err)
 	}
 
-	router.AddMiddleware(SaveLogsMiddleware)
 	router.AddMiddleware(AddCorrelationIDMiddleware)
+	router.AddMiddleware(SaveLogsMiddleware)
 
 	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
 		var event TicketBookingConfirmed
@@ -283,7 +283,10 @@ func AddCorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
 		if correlationID == "" {
 			correlationID = shortuuid.New()
 		}
-		ctx := log.ContextWithCorrelationID(msg.Context(), correlationID)
+
+		ctx := log.ToContext(msg.Context(), logrus.WithFields(logrus.Fields{"correlation_id": correlationID}))
+		ctx = log.ContextWithCorrelationID(ctx, correlationID)
+
 		msg.SetContext(ctx)
 		return next(msg)
 	}
@@ -291,7 +294,8 @@ func AddCorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
 
 func SaveLogsMiddleware(next message.HandlerFunc) message.HandlerFunc {
 	return func(msg *message.Message) ([]*message.Message, error) {
-		logrus.WithField("message_uuid", msg.UUID).Info("Handling a message")
+		logger := log.FromContext(msg.Context())
+		logger.WithField("message_uuid", msg.UUID).Info("Handling a message")
 		return next(msg)
 	}
 }
