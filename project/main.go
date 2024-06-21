@@ -18,6 +18,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/google/uuid"
+	"github.com/lithammer/shortuuid/v3"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
@@ -81,7 +82,12 @@ func NewHeader() EventHeader {
 func main() {
 	log.Init(logrus.InfoLevel)
 
-	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"), nil)
+	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"),
+		func(ctx context.Context, req *http.Request) error {
+			req.Header.Set("Correlation-ID", log.CorrelationIDFromContext(ctx))
+			return nil
+		})
+
 	if err != nil {
 		panic(err)
 	}
@@ -142,6 +148,7 @@ func main() {
 				}
 
 				msg := message.NewMessage(watermill.NewUUID(), payload)
+				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
 
 				err = publisher.Publish("TicketBookingCanceled", msg)
 				if err != nil {
@@ -163,6 +170,7 @@ func main() {
 				}
 
 				msg := message.NewMessage(watermill.NewUUID(), payload)
+				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
 
 				err = publisher.Publish("TicketBookingConfirmed", msg)
 				if err != nil {
@@ -183,7 +191,8 @@ func main() {
 		panic(err)
 	}
 
-	router.AddMiddleware(SaveLogsMiddleware())
+	router.AddMiddleware(SaveLogsMiddleware)
+	router.AddMiddleware(AddCorrelationIDMiddleware)
 
 	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
 		var event TicketBookingConfirmed
@@ -197,7 +206,7 @@ func main() {
 		payload.CustomerEmail = event.CustomerEmail
 		payload.Price = event.Price
 
-		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-print", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
+		return spreadsheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
 	})
 
 	router.AddNoPublisherHandler("issue_receipt", "TicketBookingConfirmed", issueReceiptSub, func(msg *message.Message) error {
@@ -211,7 +220,7 @@ func main() {
 		issueReceiptReq.TicketID = event.TicketID
 		issueReceiptReq.Price = event.Price
 
-		return receiptsClient.IssueReceipt(context.Background(), issueReceiptReq)
+		return receiptsClient.IssueReceipt(msg.Context(), issueReceiptReq)
 	})
 
 	router.AddNoPublisherHandler("cancel_ticket", "TicketBookingCanceled", appendToTrackerSub, func(msg *message.Message) error {
@@ -226,7 +235,7 @@ func main() {
 		payload.CustomerEmail = event.CustomerEmail
 		payload.Price = event.Price
 
-		return spreadsheetsClient.AppendRow(context.Background(), "tickets-to-refund", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
+		return spreadsheetsClient.AppendRow(msg.Context(), "tickets-to-refund", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
 	})
 
 	ctx := context.Background()
@@ -268,12 +277,22 @@ func main() {
 
 }
 
-func SaveLogsMiddleware() func(message.HandlerFunc) message.HandlerFunc {
-	return func(f message.HandlerFunc) message.HandlerFunc {
-		return func(msg *message.Message) ([]*message.Message, error) {
-			logrus.WithField("message_uuid", msg.UUID).Info("Handling a message")
-			return f(msg)
+func AddCorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
+	return func(msg *message.Message) ([]*message.Message, error) {
+		correlationID := msg.Metadata.Get("correlation_id")
+		if correlationID == "" {
+			correlationID = shortuuid.New()
 		}
+		ctx := log.ContextWithCorrelationID(msg.Context(), correlationID)
+		msg.SetContext(ctx)
+		return next(msg)
+	}
+}
+
+func SaveLogsMiddleware(next message.HandlerFunc) message.HandlerFunc {
+	return func(msg *message.Message) ([]*message.Message, error) {
+		logrus.WithField("message_uuid", msg.UUID).Info("Handling a message")
+		return next(msg)
 	}
 }
 
