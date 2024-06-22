@@ -17,6 +17,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/google/uuid"
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/redis/go-redis/v9"
@@ -191,8 +192,17 @@ func main() {
 		panic(err)
 	}
 
+	middlewareRetry := middleware.Retry{
+		MaxRetries:      10,
+		InitialInterval: time.Millisecond * 100,
+		MaxInterval:     time.Second,
+		Multiplier:      2,
+		Logger:          watermillLogger,
+	}
+
 	router.AddMiddleware(AddCorrelationIDMiddleware)
 	router.AddMiddleware(SaveLogsMiddleware)
+	router.AddMiddleware(middlewareRetry.Middleware)
 
 	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
 		var event TicketBookingConfirmed
