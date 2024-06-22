@@ -294,9 +294,11 @@ func AddCorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
 
 func SaveLogsMiddleware(next message.HandlerFunc) message.HandlerFunc {
 	return func(msg *message.Message) ([]*message.Message, error) {
+		mssgs, err := next(msg)
 		logger := log.FromContext(msg.Context())
-		logger.WithField("message_uuid", msg.UUID).Info("Handling a message")
-		return next(msg)
+		logger.WithFields(logrus.Fields{"message_uuid": msg.UUID,
+			"error": err}).Info("Message handling error")
+		return mssgs, err
 	}
 }
 
