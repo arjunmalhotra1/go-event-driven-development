@@ -27,6 +27,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const brokenUUID = "2beaf5bc-d5e4-4653-b075-2b36bbf28949"
+
 type TicketsConfirmationRequest struct {
 	Tickets []Ticket `json:"tickets"`
 }
@@ -150,11 +152,13 @@ func main() {
 
 				msg := message.NewMessage(watermill.NewUUID(), payload)
 				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
+				msg.Metadata.Set("type", "TicketBookingCanceled")
 
 				err = publisher.Publish("TicketBookingCanceled", msg)
 				if err != nil {
 					panic(err)
 				}
+
 			}
 
 			if ticket.Status == "confirmed" {
@@ -172,6 +176,7 @@ func main() {
 
 				msg := message.NewMessage(watermill.NewUUID(), payload)
 				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
+				msg.Metadata.Set("type", "TicketBookingConfirmed")
 
 				err = publisher.Publish("TicketBookingConfirmed", msg)
 				if err != nil {
@@ -205,6 +210,17 @@ func main() {
 	router.AddMiddleware(middlewareRetry.Middleware)
 
 	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
+
+		// Fixing a malformed JSON message
+		if msg.UUID == brokenUUID {
+			return nil
+		}
+
+		// Fixing an incorrect message type
+		if msg.Metadata.Get("type") != "TicketBookingConfirmed" {
+			return nil
+		}
+
 		var event TicketBookingConfirmed
 		err := json.Unmarshal(msg.Payload, &event)
 		if err != nil {
@@ -220,6 +236,17 @@ func main() {
 	})
 
 	router.AddNoPublisherHandler("issue_receipt", "TicketBookingConfirmed", issueReceiptSub, func(msg *message.Message) error {
+
+		// Fixing a malformed JSON message
+		if msg.UUID == brokenUUID {
+			return nil
+		}
+
+		// Fixing an incorrect message type
+		if msg.Metadata.Get("type") != "TicketBookingConfirmed" {
+			return nil
+		}
+
 		var event TicketBookingConfirmed
 		err := json.Unmarshal(msg.Payload, &event)
 		if err != nil {
@@ -234,7 +261,13 @@ func main() {
 	})
 
 	router.AddNoPublisherHandler("cancel_ticket", "TicketBookingCanceled", appendToTrackerSub, func(msg *message.Message) error {
-		var event TicketBookingConfirmed
+
+		// Fixing an incorrect message type
+		if msg.Metadata.Get("type") != "TicketBookingCanceled" {
+			return nil
+		}
+
+		var event TicketBookingCanceled
 		err := json.Unmarshal(msg.Payload, &event)
 		if err != nil {
 			panic(err)
