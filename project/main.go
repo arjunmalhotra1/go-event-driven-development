@@ -230,6 +230,14 @@ func main() {
 		var payload AppendToTrackerRequest
 		payload.TicketID = event.TicketID
 		payload.CustomerEmail = event.CustomerEmail
+
+		// Fixing a code bug: for some events, we didn't supply the currency, which was USD by default
+		// Now some events are spinning
+		// Add this if to default to USD for these events
+		if event.Price.Currency == "" {
+			event.Price.Currency = "USD"
+		}
+
 		payload.Price = event.Price
 
 		return spreadsheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
@@ -255,6 +263,14 @@ func main() {
 
 		var issueReceiptReq IssueReceiptRequest
 		issueReceiptReq.TicketID = event.TicketID
+
+		// Fixing a code bug: for some events, we didn't supply the currency, which was USD by default
+		// Now some events are spinning
+		// Add this if to default to USD for these events
+		if event.Price.Currency == "" {
+			event.Price.Currency = "USD"
+		}
+
 		issueReceiptReq.Price = event.Price
 
 		return receiptsClient.IssueReceipt(msg.Context(), issueReceiptReq)
