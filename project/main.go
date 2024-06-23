@@ -2,417 +2,44 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
+	"tickets/api"
+	"tickets/message"
+	"tickets/service"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
-	"github.com/ThreeDotsLabs/go-event-driven/common/clients/receipts"
-	"github.com/ThreeDotsLabs/go-event-driven/common/clients/spreadsheets"
-	commonHTTP "github.com/ThreeDotsLabs/go-event-driven/common/http"
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
-	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
-	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
-	"github.com/google/uuid"
-	"github.com/lithammer/shortuuid/v3"
-	"github.com/redis/go-redis/v9"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/labstack/echo/v4"
-	"github.com/sirupsen/logrus"
 )
 
-const brokenUUID = "2beaf5bc-d5e4-4653-b075-2b36bbf28949"
-
-type TicketsConfirmationRequest struct {
-	Tickets []Ticket `json:"tickets"`
-}
-
-type Ticket struct {
-	TicketID      string `json:"ticket_id"`
-	Status        string `json:"status"`
-	CustomerEmail string `json:"customer_email"`
-	Price         Money  `json:"price"`
-}
-
-type EventHeader struct {
-	ID          string `json:"id"`
-	PublishedAt string `json:"published_at"`
-}
-
-type TicketBookingConfirmed struct {
-	Header        EventHeader `json:"header"`
-	TicketID      string      `json:"ticket_id"`
-	CustomerEmail string      `json:"customer_email"`
-	Price         Money       `json:"price"`
-}
-
-type TicketBookingCanceled struct {
-	Header        EventHeader `json:"header"`
-	TicketID      string      `json:"ticket_id"`
-	CustomerEmail string      `json:"customer_email"`
-	Price         Money       `json:"price"`
-}
-
-type Money struct {
-	Amount   string `json:"amount"`
-	Currency string `json:"currency"`
-}
-
-type IssueReceiptRequest struct {
-	TicketID string `json:"ticket_id"`
-	Price    Money  `json:"price"`
-}
-
-type AppendToTrackerRequest struct {
-	TicketID      string `json:"ticket_id"`
-	CustomerEmail string `json:"customer_email"`
-	Price         Money  `json:"price"`
-}
-
-func NewHeader() EventHeader {
-	return EventHeader{
-		ID:          uuid.NewString(),
-		PublishedAt: time.Now().Format(time.RFC3339),
-	}
-}
-
 func main() {
-	log.Init(logrus.InfoLevel)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"),
+	apiClients, err := clients.NewClients(
+		os.Getenv("GATEWAY_ADDR"),
 		func(ctx context.Context, req *http.Request) error {
 			req.Header.Set("Correlation-ID", log.CorrelationIDFromContext(ctx))
 			return nil
-		})
-
-	if err != nil {
-		panic(err)
-	}
-
-	spreadsheetsClient := NewSpreadsheetsClient(clients)
-	receiptsClient := NewReceiptsClient(clients)
-
-	watermillLogger := log.NewWatermill(logrus.NewEntry(logrus.StandardLogger()))
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_ADDR"),
-	})
-
-	publisher, err := redisstream.NewPublisher(redisstream.PublisherConfig{Client: rdb},
-		watermillLogger,
+		},
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	issueReceiptSub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
-		Client:        rdb,
-		ConsumerGroup: "issue-receipt",
-	}, watermillLogger)
+	redisClient := message.NewRedisClient(os.Getenv("REDIS_ADDR"))
+	defer redisClient.Close()
+
+	spreadsheetsService := api.NewSpreadsheetsAPIClient(apiClients)
+	receiptsService := api.NewReceiptsClient(apiClients)
+
+	err = service.New(
+		redisClient,
+		spreadsheetsService,
+		receiptsService,
+	).Run(ctx)
 	if err != nil {
 		panic(err)
 	}
-
-	appendToTrackerSub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
-		Client:        rdb,
-		ConsumerGroup: "append-to-tracker",
-	}, watermillLogger)
-	if err != nil {
-		panic(err)
-	}
-
-	e := commonHTTP.NewEcho()
-	e.POST("/tickets-status", func(c echo.Context) error {
-		var request TicketsConfirmationRequest
-		err := c.Bind(&request)
-		if err != nil {
-			return err
-		}
-
-		for _, ticket := range request.Tickets {
-
-			if ticket.Status == "canceled" {
-				event := TicketBookingCanceled{
-					Header:        NewHeader(),
-					TicketID:      ticket.TicketID,
-					CustomerEmail: ticket.CustomerEmail,
-					Price:         ticket.Price,
-				}
-
-				payload, err := json.Marshal(event)
-				if err != nil {
-					return err
-				}
-
-				msg := message.NewMessage(watermill.NewUUID(), payload)
-				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
-				msg.Metadata.Set("type", "TicketBookingCanceled")
-
-				err = publisher.Publish("TicketBookingCanceled", msg)
-				if err != nil {
-					panic(err)
-				}
-
-			}
-
-			if ticket.Status == "confirmed" {
-				event := TicketBookingConfirmed{
-					Header:        NewHeader(),
-					TicketID:      ticket.TicketID,
-					CustomerEmail: ticket.CustomerEmail,
-					Price:         ticket.Price,
-				}
-
-				payload, err := json.Marshal(event)
-				if err != nil {
-					return err
-				}
-
-				msg := message.NewMessage(watermill.NewUUID(), payload)
-				msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
-				msg.Metadata.Set("type", "TicketBookingConfirmed")
-
-				err = publisher.Publish("TicketBookingConfirmed", msg)
-				if err != nil {
-					panic(err)
-				}
-			}
-		}
-
-		return c.NoContent(http.StatusOK)
-	})
-
-	e.GET("/health", func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	})
-
-	router, err := message.NewRouter(message.RouterConfig{}, watermillLogger)
-	if err != nil {
-		panic(err)
-	}
-
-	middlewareRetry := middleware.Retry{
-		MaxRetries:      10,
-		InitialInterval: time.Millisecond * 100,
-		MaxInterval:     time.Second,
-		Multiplier:      2,
-		Logger:          watermillLogger,
-	}
-
-	router.AddMiddleware(AddCorrelationIDMiddleware)
-	router.AddMiddleware(SaveLogsMiddleware)
-	router.AddMiddleware(middlewareRetry.Middleware)
-
-	router.AddNoPublisherHandler("print_ticket", "TicketBookingConfirmed", appendToTrackerSub, func(msg *message.Message) error {
-
-		// Fixing a malformed JSON message
-		if msg.UUID == brokenUUID {
-			return nil
-		}
-
-		// Fixing an incorrect message type
-		if msg.Metadata.Get("type") != "TicketBookingConfirmed" {
-			return nil
-		}
-
-		var event TicketBookingConfirmed
-		err := json.Unmarshal(msg.Payload, &event)
-		if err != nil {
-			panic(err)
-		}
-
-		var payload AppendToTrackerRequest
-		payload.TicketID = event.TicketID
-		payload.CustomerEmail = event.CustomerEmail
-
-		// Fixing a code bug: for some events, we didn't supply the currency, which was USD by default
-		// Now some events are spinning
-		// Add this if to default to USD for these events
-		if event.Price.Currency == "" {
-			event.Price.Currency = "USD"
-		}
-
-		payload.Price = event.Price
-
-		return spreadsheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
-	})
-
-	router.AddNoPublisherHandler("issue_receipt", "TicketBookingConfirmed", issueReceiptSub, func(msg *message.Message) error {
-
-		// Fixing a malformed JSON message
-		if msg.UUID == brokenUUID {
-			return nil
-		}
-
-		// Fixing an incorrect message type
-		if msg.Metadata.Get("type") != "TicketBookingConfirmed" {
-			return nil
-		}
-
-		var event TicketBookingConfirmed
-		err := json.Unmarshal(msg.Payload, &event)
-		if err != nil {
-			panic(err)
-		}
-
-		var issueReceiptReq IssueReceiptRequest
-		issueReceiptReq.TicketID = event.TicketID
-
-		// Fixing a code bug: for some events, we didn't supply the currency, which was USD by default
-		// Now some events are spinning
-		// Add this if to default to USD for these events
-		if event.Price.Currency == "" {
-			event.Price.Currency = "USD"
-		}
-
-		issueReceiptReq.Price = event.Price
-
-		return receiptsClient.IssueReceipt(msg.Context(), issueReceiptReq)
-	})
-
-	router.AddNoPublisherHandler("cancel_ticket", "TicketBookingCanceled", appendToTrackerSub, func(msg *message.Message) error {
-
-		// Fixing an incorrect message type
-		if msg.Metadata.Get("type") != "TicketBookingCanceled" {
-			return nil
-		}
-
-		var event TicketBookingCanceled
-		err := json.Unmarshal(msg.Payload, &event)
-		if err != nil {
-			panic(err)
-		}
-
-		var payload AppendToTrackerRequest
-		payload.TicketID = event.TicketID
-		payload.CustomerEmail = event.CustomerEmail
-		payload.Price = event.Price
-
-		return spreadsheetsClient.AppendRow(msg.Context(), "tickets-to-refund", []string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency})
-	})
-
-	ctx := context.Background()
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		return router.Run(context.Background())
-	})
-
-	logrus.Info("Server starting...")
-
-	g.Go(func() error {
-
-		// we don't want to start HTTP server before Watermill router (so service won't be healthy before it's ready)
-		<-router.Running()
-
-		err := e.Start(":8080")
-		if err != nil && err != http.ErrServerClosed {
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		// Shutdown the HTTP server
-		<-ctx.Done()
-		return e.Shutdown(ctx)
-
-	})
-
-	// Will block until all goroutines finish
-	err = g.Wait()
-	if err != nil {
-		panic(err)
-	}
-
-}
-
-func AddCorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
-	return func(msg *message.Message) ([]*message.Message, error) {
-		correlationID := msg.Metadata.Get("correlation_id")
-		if correlationID == "" {
-			correlationID = shortuuid.New()
-		}
-
-		ctx := log.ToContext(msg.Context(), logrus.WithFields(logrus.Fields{"correlation_id": correlationID}))
-		ctx = log.ContextWithCorrelationID(ctx, correlationID)
-
-		msg.SetContext(ctx)
-		return next(msg)
-	}
-}
-
-func SaveLogsMiddleware(next message.HandlerFunc) message.HandlerFunc {
-	return func(msg *message.Message) ([]*message.Message, error) {
-		mssgs, err := next(msg)
-		logger := log.FromContext(msg.Context())
-		logger.WithFields(logrus.Fields{"message_uuid": msg.UUID,
-			"error": err}).Info("Message handling error")
-		return mssgs, err
-	}
-}
-
-type ReceiptsClient struct {
-	clients *clients.Clients
-}
-
-func NewReceiptsClient(clients *clients.Clients) ReceiptsClient {
-	return ReceiptsClient{
-		clients: clients,
-	}
-}
-
-func (c ReceiptsClient) IssueReceipt(ctx context.Context, request IssueReceiptRequest) error {
-	body := receipts.PutReceiptsJSONRequestBody{
-		TicketId: request.TicketID,
-		Price: receipts.Money{
-			MoneyAmount:   request.Price.Amount,
-			MoneyCurrency: request.Price.Currency,
-		},
-	}
-
-	receiptsResp, err := c.clients.Receipts.PutReceiptsWithResponse(ctx, body)
-	if err != nil {
-		return err
-	}
-	if receiptsResp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %v", receiptsResp.StatusCode())
-	}
-
-	return nil
-}
-
-type SpreadsheetsClient struct {
-	clients *clients.Clients
-}
-
-func NewSpreadsheetsClient(clients *clients.Clients) SpreadsheetsClient {
-	return SpreadsheetsClient{
-		clients: clients,
-	}
-}
-
-func (c SpreadsheetsClient) AppendRow(ctx context.Context, spreadsheetName string, row []string) error {
-	request := spreadsheets.PostSheetsSheetRowsJSONRequestBody{
-		Columns: row,
-	}
-
-	sheetsResp, err := c.clients.Spreadsheets.PostSheetsSheetRowsWithResponse(ctx, spreadsheetName, request)
-	if err != nil {
-		return err
-	}
-	if sheetsResp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %v", sheetsResp.StatusCode())
-	}
-
-	return nil
 }
