@@ -1,4 +1,4 @@
-package tests
+package api
 
 import (
 	"context"
@@ -21,13 +21,4 @@ func (r *ReceiptsServiceMock) IssueReceipt(ctx context.Context, request entities
 	response.ReceiptNumber = "1234"
 	response.IssuedAt = time.Now()
 	return response, nil
-}
-
-type SpreadsheetsMock struct {
-	IssuedReceipts []entities.IssueReceiptRequest
-	Mock           sync.Mutex
-}
-
-func (s *SpreadsheetsMock) AppendRow(ctx context.Context, sheetName string, row []string) error {
-	return nil
 }
