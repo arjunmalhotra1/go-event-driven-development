@@ -52,6 +52,21 @@ func TestComponent(t *testing.T) {
 
 	assertReceiptForTicketIssued(t, &receiptsService, ticket)
 	assertRowToSheetAdded(t, &spreadSheetService, ticket, "tickets-to-print")
+
+	ticketCancelled := TicketStatus{
+		TicketID: uuid.NewString(),
+		Status:   "cancelled",
+		Price: Money{
+			Amount:   "50.30",
+			Currency: "GBP",
+		},
+		Email:     "email@example.com",
+		BookingID: uuid.NewString(),
+	}
+
+	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticketCancelled}})
+
+	assertRowToSheetAdded(t, &spreadSheetService, ticketCancelled, "tickets-to-refund")
 }
 
 func assertRowToSheetAdded(t *testing.T, SpreadSheetService *api.SpreadsheetsMock, ticket TicketStatus, sheetName string) bool {
