@@ -27,5 +27,5 @@ func NewFollowRequestSentHandler(counter EventsCounter) cqrs.EventHandler {
 	h := EventsCounterHandler{
 		eventCounter: counter,
 	}
-	return cqrs.NewEventHandler("", h.NotifcationEvent)
+	return cqrs.NewEventHandler("NotifyOnEachEvent", h.NotifcationEvent)
 }
