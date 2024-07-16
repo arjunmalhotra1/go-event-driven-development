@@ -2,20 +2,19 @@ package event
 
 import (
 	"context"
-	"tickets/db"
 	"tickets/entities"
 )
 
 type Handler struct {
-	spreadsheetsService         SpreadsheetsAPI
-	receiptsService             ReceiptsService
-	saveTicketToDatabaseService SaveTicketToDatabaseService
+	spreadsheetsService SpreadsheetsAPI
+	receiptsService     ReceiptsService
+	ticketsRepository   TicketsRepository
 }
 
 func NewHandler(
 	spreadsheetsService SpreadsheetsAPI,
 	receiptsService ReceiptsService,
-	saveTicketToDatabaseService SaveTicketToDatabaseService,
+	ticketsRepository TicketsRepository,
 ) Handler {
 	if spreadsheetsService == nil {
 		panic("missing spreadsheetsService")
@@ -25,9 +24,9 @@ func NewHandler(
 	}
 
 	return Handler{
-		spreadsheetsService:         spreadsheetsService,
-		receiptsService:             receiptsService,
-		saveTicketToDatabaseService: saveTicketToDatabaseService,
+		spreadsheetsService: spreadsheetsService,
+		receiptsService:     receiptsService,
+		ticketsRepository:   ticketsRepository,
 	}
 }
 
@@ -39,6 +38,6 @@ type ReceiptsService interface {
 	IssueReceipt(ctx context.Context, request entities.IssueReceiptRequest) (entities.IssueReceiptResponse, error)
 }
 
-type SaveTicketToDatabaseService interface {
-	SaveTicketToDatabase(ctx context.Context, ticket db.Ticket) error
+type TicketsRepository interface {
+	Add(ctx context.Context, ticket entities.Ticket) error
 }

@@ -1,8 +1,33 @@
 package db
 
-type Ticket struct {
-	TicketID      string
-	PriceAmount   string
-	PriceCurrency string
-	CustomerEmail string
+import (
+	"context"
+	"fmt"
+	"tickets/entities"
+
+	"github.com/jmoiron/sqlx"
+)
+
+type TicketsRepository struct {
+	db *sqlx.DB
+}
+
+var insertQuery string = `Insert into tickets (ticket_id, price_amount, price_currency, customer_email)
+VALUES (:ticket_id, :price.amount, :price.currency, :customer_email)`
+
+func NewTicketsRepository(db *sqlx.DB) TicketsRepository {
+	if db == nil {
+		panic("Database client is nil")
+	}
+
+	return TicketsRepository{db: db}
+}
+
+func (t TicketsRepository) Add(ctx context.Context, ticket entities.Ticket) error {
+	_, err := t.db.NamedExec(insertQuery, ticket)
+	if err != nil {
+		return fmt.Errorf("could not save the ticket: %w", err)
+	}
+
+	return nil
 }

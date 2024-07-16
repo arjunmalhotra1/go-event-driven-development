@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	stdHTTP "net/http"
-	"tickets/api"
 	"tickets/db"
 	"tickets/message"
 	"tickets/message/event"
@@ -47,9 +46,9 @@ func New(
 
 	eventBus := event.NewEventBus(redisPublisher)
 
-	saveTicketToDatabaseService := api.NewDatabaseClient(dbConn)
+	ticketRepo := db.NewTicketsRepository(dbConn)
 
-	eventsHandler := event.NewHandler(spreadsheetsService, receiptsService, saveTicketToDatabaseService)
+	eventsHandler := event.NewHandler(spreadsheetsService, receiptsService, ticketRepo)
 
 	eventProcessorConfig := event.NewProcessorConfig(redisClient, watermillLogger)
 
