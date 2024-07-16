@@ -28,7 +28,7 @@ func NewWatermillRouter(eventProcessorConfig cqrs.EventProcessorConfig, eventHan
 		cqrs.NewEventHandler("TicketRefundToSheet", eventHandler.TicketRefundToSheet),
 		cqrs.NewEventHandler("IssueReceipt", eventHandler.IssueReceipt),
 		cqrs.NewEventHandler("SaveTicketToDatabase", eventHandler.SaveTicketToDatabase),
-		cqrs.NewEventHandler("DeleteTicketFromDatabase", eventHandler.Delete),
+		cqrs.NewEventHandler("RemoveCanceledTicket", eventHandler.RemoveCanceledTicket),
 	)
 
 	return router

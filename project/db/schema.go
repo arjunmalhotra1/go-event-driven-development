@@ -14,13 +14,11 @@ var createTicketsTable string = `CREATE TABLE IF NOT EXISTS tickets (
 	);`
 
 func InitializeDatabaseSchema(db *sqlx.DB) error {
-	res, err := db.Exec(createTicketsTable)
+	_, err := db.Exec(createTicketsTable)
 
 	if err != nil {
 		return fmt.Errorf("could not initialize database schema: %w", err)
 	}
-
-	fmt.Println(res)
 
 	return nil
 }
