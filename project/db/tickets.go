@@ -15,8 +15,6 @@ type TicketsRepository struct {
 var insertQuery string = `Insert into tickets (ticket_id, price_amount, price_currency, customer_email)
 VALUES (:ticket_id, :price.amount, :price.currency, :customer_email)`
 
-var deleteQuery string = `Delete from tickets where ticket_id = ":ticket_id"`
-
 func NewTicketsRepository(db *sqlx.DB) TicketsRepository {
 	if db == nil {
 		panic("Database client is nil")
@@ -46,4 +44,16 @@ func (t TicketsRepository) Delete(ctx context.Context, ticketID string) error {
 	}
 
 	return nil
+}
+
+func (t TicketsRepository) GetAll(ctx context.Context) ([]entities.Ticket, error) {
+	var returnTickets []entities.Ticket
+
+	err := t.db.SelectContext(ctx, &returnTickets, `SELECT ticket_id, price_amount as "price.amount", price_currency as "price.currency", customer_email FROM tickets`)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return returnTickets, nil
 }
