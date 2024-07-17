@@ -60,3 +60,12 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 
 	return c.NoContent(http.StatusOK)
 }
+
+func (h Handler) GetAllTickets(ctx echo.Context) error {
+	res, err := h.ticketRepository.GetAll(ctx.Request().Context())
+	if err != nil {
+		return fmt.Errorf("failed to publish get all tickets event %w", err)
+	}
+
+	return ctx.JSON(http.StatusOK, res)
+}
