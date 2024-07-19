@@ -13,7 +13,7 @@ type TicketsRepository struct {
 }
 
 var insertQuery string = `Insert into tickets (ticket_id, price_amount, price_currency, customer_email)
-VALUES (:ticket_id, :price.amount, :price.currency, :customer_email)`
+VALUES (:ticket_id, :price.amount, :price.currency, :customer_email) ON CONFLICT DO NOTHING`
 
 func NewTicketsRepository(db *sqlx.DB) TicketsRepository {
 	if db == nil {
