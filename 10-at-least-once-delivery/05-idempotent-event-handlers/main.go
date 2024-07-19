@@ -1,11 +1,16 @@
 package main
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type PaymentTaken struct {
 	PaymentID string
 	Amount    int
 }
+
+var paymentMap map[string]struct{}
 
 type PaymentsHandler struct {
 	repo *PaymentsRepository
@@ -28,10 +33,16 @@ func (p *PaymentsRepository) Payments() []PaymentTaken {
 }
 
 func NewPaymentsRepository() *PaymentsRepository {
+	paymentMap = make(map[string]struct{})
 	return &PaymentsRepository{}
 }
 
 func (p *PaymentsRepository) SavePaymentTaken(ctx context.Context, event *PaymentTaken) error {
-	p.payments = append(p.payments, *event)
+	fmt.Println(event.PaymentID)
+	if _, ok := paymentMap[event.PaymentID]; !ok {
+		p.payments = append(p.payments, *event)
+		paymentMap[event.PaymentID] = struct{}{}
+	}
+
 	return nil
 }
