@@ -29,8 +29,16 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 
 	for _, ticket := range request.Tickets {
 		if ticket.Status == "confirmed" {
+			var header entities.EventHeader
+			idemKey := c.Request().Header.Get("Idempotency-Key")
+			if idemKey != "" {
+				header = entities.NewEventHeaderWithIdempotencyKey(idemKey + ticket.TicketID)
+			} else {
+				header = entities.NewEventHeader()
+			}
+
 			event := entities.TicketBookingConfirmed{
-				Header:        entities.NewEventHeader(),
+				Header:        header,
 				TicketID:      ticket.TicketID,
 				CustomerEmail: ticket.CustomerEmail,
 				Price:         ticket.Price,
@@ -41,8 +49,16 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 				return fmt.Errorf("failed to publish TicketBookingConfirmed event: %w", err)
 			}
 		} else if ticket.Status == "canceled" {
+			var header entities.EventHeader
+			idemKey := c.Request().Header.Get("Idempotency-Key")
+			if idemKey != "" {
+				header = entities.NewEventHeaderWithIdempotencyKey(idemKey + ticket.TicketID)
+			} else {
+				header = entities.NewEventHeader()
+			}
+
 			event := entities.TicketBookingCanceled{
-				Header:        entities.NewEventHeader(),
+				Header:        header,
 				TicketID:      ticket.TicketID,
 				CustomerEmail: ticket.CustomerEmail,
 				Price:         ticket.Price,
