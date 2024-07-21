@@ -38,9 +38,15 @@ func TestComponent(t *testing.T) {
 	spreadSheetService := api.SpreadsheetsMock{}
 
 	go func() {
-		svc := service.New(redisClient, &spreadSheetService, &receiptsService, db)
-
+		svc := service.New(
+			redisClient,
+			&spreadSheetService,
+			&receiptsService,
+			nil, // todo: pass files APIdb)
+			db,
+		)
 		assert.NoError(t, svc.Run(ctx))
+
 	}()
 	waitForHttpServer(t)
 

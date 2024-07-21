@@ -9,11 +9,13 @@ type Handler struct {
 	spreadsheetsService SpreadsheetsAPI
 	receiptsService     ReceiptsService
 	ticketsRepository   TicketsRepository
+	filesAPI            FilesAPI
 }
 
 func NewHandler(
 	spreadsheetsService SpreadsheetsAPI,
 	receiptsService ReceiptsService,
+	filesAPI FilesAPI,
 	ticketsRepository TicketsRepository,
 ) Handler {
 	if spreadsheetsService == nil {
@@ -27,6 +29,7 @@ func NewHandler(
 		spreadsheetsService: spreadsheetsService,
 		receiptsService:     receiptsService,
 		ticketsRepository:   ticketsRepository,
+		filesAPI:            filesAPI,
 	}
 }
 
@@ -41,4 +44,8 @@ type ReceiptsService interface {
 type TicketsRepository interface {
 	Add(ctx context.Context, ticket entities.Ticket) error
 	Delete(ctx context.Context, ticketID string) error
+}
+
+type FilesAPI interface {
+	UploadTicket(ctx context.Context, fileID string, fileContent string) error
 }
