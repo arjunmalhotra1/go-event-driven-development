@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 	"tickets/api"
+	dbAdapters "tickets/db"
 	"tickets/entities"
 	"tickets/message"
 	"tickets/service"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/lithammer/shortuuid/v3"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,21 +35,21 @@ func TestComponent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	receiptsService := api.ReceiptsServiceMock{}
-
-	spreadSheetService := api.SpreadsheetsMock{}
+	spreadsheetsService := &api.SpreadsheetsMock{}
+	receiptsService := &api.ReceiptsServiceMock{IssuedReceipts: map[string]entities.IssueReceiptRequest{}}
+	filesAPI := &api.FileAPIMock{}
 
 	go func() {
 		svc := service.New(
 			redisClient,
-			&spreadSheetService,
-			&receiptsService,
-			nil, // todo: pass files APIdb)
+			spreadsheetsService,
+			receiptsService,
+			filesAPI,
 			db,
 		)
 		assert.NoError(t, svc.Run(ctx))
-
 	}()
+
 	waitForHttpServer(t)
 
 	ticket := TicketStatus{
@@ -61,71 +63,114 @@ func TestComponent(t *testing.T) {
 		BookingID: uuid.NewString(),
 	}
 
-	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticket}})
+	idempotencyKey := uuid.NewString()
 
-	assertReceiptForTicketIssued(t, &receiptsService, ticket)
-	assertRowToSheetAdded(t, &spreadSheetService, ticket, "tickets-to-print")
-
-	ticketCancelled := TicketStatus{
-		TicketID: uuid.NewString(),
-		Status:   "cancelled",
-		Price: Money{
-			Amount:   "50.30",
-			Currency: "GBP",
-		},
-		Email:     "email@example.com",
-		BookingID: uuid.NewString(),
+	// check idempotency
+	for i := 0; i < 3; i++ {
+		sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticket}}, idempotencyKey)
 	}
 
-	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticketCancelled}})
+	assertReceiptForTicketIssued(t, receiptsService, ticket)
+	assertTicketPrinted(t, filesAPI, ticket)
+	assertRowToSheetAdded(t, spreadsheetsService, ticket, "tickets-to-print")
+	assertTicketStoredInRepository(t, db, ticket)
 
-	assertRowToSheetAdded(t, &spreadSheetService, ticketCancelled, "tickets-to-refund")
+	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{
+		{
+			TicketID: ticket.TicketID,
+			Status:   "canceled",
+			Email:    ticket.Email,
+		},
+	}}, uuid.NewString())
+
+	assertRowToSheetAdded(t, spreadsheetsService, ticket, "tickets-to-refund")
 }
 
-func assertRowToSheetAdded(t *testing.T, SpreadSheetService *api.SpreadsheetsMock, ticket TicketStatus, sheetName string) bool {
-	return assert.EventuallyWithT(t, func(t *assert.CollectT) {
-		rows, ok := SpreadSheetService.Rows[sheetName]
-		if !assert.True(t, ok, "sheet %s not found", sheetName) {
-			return
-		}
-		allValues := []string{}
+func assertTicketStoredInRepository(t *testing.T, db *sqlx.DB, ticket TicketStatus) {
+	ticketsRepo := dbAdapters.NewTicketsRepository(db)
 
-		for _, row := range rows {
-			for _, col := range row {
-				allValues = append(allValues, col)
+	assert.Eventually(
+		t,
+		func() bool {
+			tickets, err := ticketsRepo.GetAll(context.Background())
+			if err != nil {
+				return false
 			}
-		}
-		assert.Contains(t, allValues, ticket.TicketID, "ticket id not found in sheet %s", sheetName)
-	},
+
+			for _, t := range tickets {
+				if t.TicketID == ticket.TicketID {
+					return true
+				}
+			}
+
+			return false
+		},
 		10*time.Second,
-		100*time.Millisecond)
+		100*time.Millisecond,
+	)
 }
 
-func assertReceiptForTicketIssued(t *testing.T, receiptService *api.ReceiptsServiceMock, ticket TicketStatus) {
+func assertRowToSheetAdded(t *testing.T, spreadsheetsService *api.SpreadsheetsMock, ticket TicketStatus, sheetName string) bool {
+	return assert.EventuallyWithT(
+		t,
+		func(t *assert.CollectT) {
+			rows, ok := spreadsheetsService.Rows[sheetName]
+			if !assert.True(t, ok, "sheet %s not found", sheetName) {
+				return
+			}
+
+			allValues := []string{}
+
+			for _, row := range rows {
+				for _, col := range row {
+					allValues = append(allValues, col)
+				}
+			}
+
+			assert.Contains(t, allValues, ticket.TicketID, "ticket id not found in sheet %s", sheetName)
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+}
+
+func assertTicketPrinted(t *testing.T, filesAPI *api.FileAPIMock, ticket TicketStatus) bool {
+	return assert.EventuallyWithT(
+		t,
+		func(t *assert.CollectT) {
+			content, err := filesAPI.DownloadFile(context.Background(), ticket.TicketID+"-ticket.html")
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			if assert.NotEmpty(t, content) {
+				return
+			}
+
+			assert.Contains(t, content, ticket.TicketID)
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+}
+
+func assertReceiptForTicketIssued(t *testing.T, receiptsService *api.ReceiptsServiceMock, ticket TicketStatus) {
 	assert.EventuallyWithT(
 		t,
 		func(collectT *assert.CollectT) {
-			issuedReceipts := len(receiptService.IssuedReceipts)
-			t.Log("issued receipts", issuedReceipts)
-			assert.Greater(collectT, issuedReceipts, 0, "no receipts issued")
+			issuedReceipts := len(receiptsService.IssuedReceipts)
+
+			assert.Equal(collectT, 1, issuedReceipts, "receipt for ticket %s not found", ticket.TicketID)
 		},
 		10*time.Second,
-		10*time.Millisecond,
+		100*time.Millisecond,
 	)
 
-	var receipt entities.IssueReceiptRequest
-	var ok bool
-
-	for _, issuedReceipt := range receiptService.IssuedReceipts {
-		if issuedReceipt.TicketID != ticket.TicketID {
-			continue
-		}
-		receipt = issuedReceipt
-		ok = true
-		break
-	}
-
+	receipt, ok := lo.Find(lo.Values(receiptsService.IssuedReceipts), func(r entities.IssueReceiptRequest) bool {
+		return r.TicketID == ticket.TicketID
+	})
 	require.Truef(t, ok, "receipt for ticket %s not found", ticket.TicketID)
+
 	assert.Equal(t, ticket.TicketID, receipt.TicketID)
 	assert.Equal(t, ticket.Price.Amount, receipt.Price.Amount)
 	assert.Equal(t, ticket.Price.Currency, receipt.Price.Currency)
@@ -148,7 +193,7 @@ type Money struct {
 	Currency string `json:"currency"`
 }
 
-func sendTicketsStatus(t *testing.T, req TicketsStatusRequest) {
+func sendTicketsStatus(t *testing.T, req TicketsStatusRequest, idempotencyKey string) {
 	t.Helper()
 
 	payload, err := json.Marshal(req)
@@ -169,6 +214,7 @@ func sendTicketsStatus(t *testing.T, req TicketsStatusRequest) {
 	require.NoError(t, err)
 
 	httpReq.Header.Set("Correlation-ID", correlationID)
+	httpReq.Header.Set("Idempotency-Key", idempotencyKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(httpReq)
