@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"tickets/entities"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -18,6 +19,14 @@ type ticketStatusRequest struct {
 	Price         entities.Money `json:"price"`
 	CustomerEmail string         `json:"customer_email"`
 	BookingID     string         `json:"booking_id"`
+}
+
+type postShowRequest struct {
+	DeadNationId    string `json:"dead_nation_id"`
+	NumberOfTickets int64  `json:"number_of_tickets"`
+	StartTime       string `json:"start_time"`
+	Title           string `json:"title"`
+	Venue           string `json:"venue"`
 }
 
 func (h Handler) PostTicketsStatus(c echo.Context) error {
@@ -84,4 +93,32 @@ func (h Handler) GetAllTickets(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, res)
+}
+
+func (h Handler) PostShow(ctx echo.Context) error {
+
+	var request postShowRequest
+	err := ctx.Bind(&request)
+	if err != nil {
+		return err
+	}
+
+	showID := uuid.NewString()
+	show := entities.Show{
+		ShowId:          showID,
+		DeadNationId:    request.DeadNationId,
+		NumberOfTickets: request.NumberOfTickets,
+		StartTime:       request.StartTime,
+		Title:           request.Title,
+		Venue:           request.Venue,
+	}
+
+	h.showRepository.Add(ctx.Request().Context(), show)
+
+	response := struct {
+		ShowID string `json:"show_id"`
+	}{
+		ShowID: showID,
+	}
+	return ctx.JSON(http.StatusCreated, response)
 }
