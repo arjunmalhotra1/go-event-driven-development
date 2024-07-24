@@ -49,6 +49,8 @@ func New(
 
 	ticketRepo := db.NewTicketsRepository(dbConn)
 
+	showRepo := db.NewShowRepository(dbConn)
+
 	eventsHandler := event.NewHandler(spreadsheetsService, receiptsService, filesAPI, ticketRepo, eventBus)
 
 	eventProcessorConfig := event.NewProcessorConfig(redisClient, watermillLogger)
@@ -63,6 +65,7 @@ func New(
 		eventBus,
 		spreadsheetsService,
 		ticketRepo,
+		showRepo,
 	)
 
 	return Service{

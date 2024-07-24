@@ -11,6 +11,7 @@ type Handler struct {
 	eventBus              *cqrs.EventBus
 	spreadsheetsAPIClient SpreadsheetsAPI
 	ticketRepository      TicketRepository
+	showRepository        ShowRepository
 }
 
 type SpreadsheetsAPI interface {
@@ -27,4 +28,8 @@ type SpreadsheetsAPI interface {
 
 type TicketRepository interface {
 	GetAll(ctx context.Context) ([]entities.Ticket, error)
+}
+
+type ShowRepository interface {
+	Add(ctx context.Context, show entities.Show) error
 }
