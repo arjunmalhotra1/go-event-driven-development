@@ -19,7 +19,7 @@ var createShowTable string = `CREATE TABLE IF NOT EXISTS shows (
 	number_of_tickets INT NOT NULL,
 	start_time TIMESTAMP NOT NULL,
 	title VARCHAR(255) NOT NULL,
-	venue VARCHAR(255) NOT NULL
+	venue VARCHAR(255) NOT NULL,
 
 	UNIQUE (dead_nation_id)
 	);`
