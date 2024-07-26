@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"tickets/entities"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -93,32 +92,4 @@ func (h Handler) GetAllTickets(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, res)
-}
-
-func (h Handler) PostShow(ctx echo.Context) error {
-
-	var request postShowRequest
-	err := ctx.Bind(&request)
-	if err != nil {
-		return err
-	}
-
-	showID := uuid.NewString()
-	show := entities.Show{
-		ShowId:          showID,
-		DeadNationId:    request.DeadNationId,
-		NumberOfTickets: request.NumberOfTickets,
-		StartTime:       request.StartTime,
-		Title:           request.Title,
-		Venue:           request.Venue,
-	}
-
-	h.showRepository.Add(ctx.Request().Context(), show)
-
-	response := struct {
-		ShowID string `json:"show_id"`
-	}{
-		ShowID: showID,
-	}
-	return ctx.JSON(http.StatusCreated, response)
 }
