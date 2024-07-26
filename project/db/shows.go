@@ -25,8 +25,7 @@ func NewShowRepository(db *sqlx.DB) ShowRepository {
 }
 
 func (sr ShowRepository) Add(ctx context.Context, show entities.Show) error {
-	fmt.Println("Inside the show add function")
-	_, err := sr.db.NamedExec(insertShowQuery, show)
+	_, err := sr.db.NamedExecContext(ctx, insertShowQuery, show)
 	if err != nil {
 		return fmt.Errorf("could not save the show: %w", err)
 	}
