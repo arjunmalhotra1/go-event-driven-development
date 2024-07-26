@@ -16,10 +16,12 @@ var createTicketsTable string = `CREATE TABLE IF NOT EXISTS tickets (
 var createShowTable string = `CREATE TABLE IF NOT EXISTS shows (
 	show_id UUID PRIMARY KEY,
 	dead_nation_id UUID NOT NULL,
-	number_of_tickets NUMERIC(10) NOT NULL,
-	start_time VARCHAR(255) NOT NULL,
+	number_of_tickets INT NOT NULL,
+	start_time TIMESTAMP NOT NULL,
 	title VARCHAR(255) NOT NULL,
 	venue VARCHAR(255) NOT NULL
+
+	UNIQUE (dead_nation_id)
 	);`
 
 func InitializeDatabaseSchema(db *sqlx.DB) error {
