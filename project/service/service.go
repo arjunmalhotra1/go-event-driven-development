@@ -50,6 +50,7 @@ func New(
 	ticketRepo := db.NewTicketsRepository(dbConn)
 
 	showRepo := db.NewShowRepository(dbConn)
+	bookingRepo := db.NewBookingRepository(dbConn)
 
 	eventsHandler := event.NewHandler(spreadsheetsService, receiptsService, filesAPI, ticketRepo, eventBus)
 
@@ -66,6 +67,7 @@ func New(
 		spreadsheetsService,
 		ticketRepo,
 		showRepo,
+		bookingRepo,
 	)
 
 	return Service{
