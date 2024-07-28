@@ -18,5 +18,6 @@ use (
 	./09-cqrs-events/04-event-processor
 	./09-cqrs-events/05-event-handler
 	./09-cqrs-events/06-cqrs-with-consumer-groups
+	./11-outbox/04-publishing-event-in-transaction
 	./project
 )
